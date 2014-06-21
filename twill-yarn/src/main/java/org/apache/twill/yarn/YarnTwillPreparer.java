@@ -53,8 +53,8 @@ import org.apache.twill.api.TwillSpecification;
 import org.apache.twill.api.logging.LogHandler;
 import org.apache.twill.filesystem.Location;
 import org.apache.twill.filesystem.LocationFactory;
-import org.apache.twill.internal.ApplicationBundler;
 import org.apache.twill.internal.Arguments;
+import org.apache.twill.internal.Bundler;
 import org.apache.twill.internal.Configs;
 import org.apache.twill.internal.Constants;
 import org.apache.twill.internal.DefaultLocalFile;
@@ -114,6 +114,7 @@ final class YarnTwillPreparer implements TwillPreparer {
   private final LocationFactory locationFactory;
   private final YarnTwillControllerFactory controllerFactory;
   private final RunId runId;
+  private final Bundler bundler;
 
   private final List<LogHandler> logHandlers = Lists.newArrayList();
   private final List<String> arguments = Lists.newArrayList();
@@ -127,9 +128,8 @@ final class YarnTwillPreparer implements TwillPreparer {
   private String extraOptions;
   private JvmOptions.DebugOptions debugOptions = JvmOptions.DebugOptions.NO_DEBUG;
 
-  YarnTwillPreparer(YarnConfiguration yarnConfig, TwillSpecification twillSpec,
-                    YarnAppClient yarnAppClient, ZKClient zkClient,
-                    LocationFactory locationFactory, String extraOptions,
+  YarnTwillPreparer(YarnConfiguration yarnConfig, TwillSpecification twillSpec, YarnAppClient yarnAppClient,
+                    ZKClient zkClient, LocationFactory locationFactory, String extraOptions, Bundler bundler,
                     YarnTwillControllerFactory controllerFactory) {
     this.yarnConfig = yarnConfig;
     this.twillSpec = twillSpec;
@@ -138,6 +138,7 @@ final class YarnTwillPreparer implements TwillPreparer {
     this.locationFactory = locationFactory;
     this.controllerFactory = controllerFactory;
     this.runId = RunIds.generate();
+    this.bundler = bundler;
     this.credentials = createCredentials();
     this.reservedMemory = yarnConfig.getInt(Configs.Keys.JAVA_RESERVED_MEMORY_MB,
                                             Configs.Defaults.JAVA_RESERVED_MEMORY_MB);
@@ -260,8 +261,8 @@ final class YarnTwillPreparer implements TwillPreparer {
           // Local files declared by runnables
           Multimap<String, LocalFile> runnableLocalFiles = HashMultimap.create();
 
-          createAppMasterJar(createBundler(), localFiles);
-          createContainerJar(createBundler(), localFiles);
+          createAppMasterJar(bundler, localFiles);
+          createContainerJar(bundler, localFiles);
           populateRunnableLocalFiles(twillSpec, runnableLocalFiles);
           saveSpecification(twillSpec, runnableLocalFiles, localFiles);
           saveLogback(localFiles);
@@ -337,10 +338,6 @@ final class YarnTwillPreparer implements TwillPreparer {
     return credentials;
   }
 
-  private ApplicationBundler createBundler() {
-    return new ApplicationBundler(ImmutableList.<String>of());
-  }
-
   private LocalFile createLocalFile(String name, Location location) throws IOException {
     return createLocalFile(name, location, false);
   }
@@ -349,7 +346,7 @@ final class YarnTwillPreparer implements TwillPreparer {
     return new DefaultLocalFile(name, location.toURI(), location.lastModified(), location.length(), archive, null);
   }
 
-  private void createAppMasterJar(ApplicationBundler bundler, Map<String, LocalFile> localFiles) throws IOException {
+  private void createAppMasterJar(Bundler bundler, Map<String, LocalFile> localFiles) throws IOException {
     try {
       LOG.debug("Create and copy {}", Constants.Files.APP_MASTER_JAR);
       Location location = createTempLocation(Constants.Files.APP_MASTER_JAR);
@@ -374,7 +371,7 @@ final class YarnTwillPreparer implements TwillPreparer {
     }
   }
 
-  private void createContainerJar(ApplicationBundler bundler, Map<String, LocalFile> localFiles) throws IOException {
+  private void createContainerJar(Bundler bundler, Map<String, LocalFile> localFiles) throws IOException {
     try {
       Set<Class<?>> classes = Sets.newIdentityHashSet();
       classes.add(TwillContainerMain.class);

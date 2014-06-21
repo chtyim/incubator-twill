@@ -54,7 +54,7 @@ import java.util.zip.CheckedOutputStream;
 /**
  * This class builds jar files based on class dependencies.
  */
-public final class ApplicationBundler {
+public final class ApplicationBundler implements Bundler {
 
   private static final Logger LOG = LoggerFactory.getLogger(ApplicationBundler.class);
   
@@ -102,28 +102,17 @@ public final class ApplicationBundler {
 
   }
 
+  @Override
   public void createBundle(Location target, Iterable<Class<?>> classes) throws IOException {
     createBundle(target, classes, ImmutableList.<URI>of());
   }
 
-  /**
-   * Same as calling {@link #createBundle(Location, Iterable)}.
-   */
-  public void createBundle(Location target, Class<?> clz, Class<?>...classes) throws IOException {
+  @Override
+  public void createBundle(Location target, Class<?> clz, Class<?>... classes) throws IOException {
     createBundle(target, ImmutableSet.<Class<?>>builder().add(clz).add(classes).build());
   }
 
-  /**
-   * Creates a jar file which includes all the given classes and all the classes that they depended on.
-   * The jar will also include all classes and resources under the packages as given as include packages
-   * in the constructor.
-   *
-   * @param target Where to save the target jar file.
-   * @param resources Extra resources to put into the jar file. If resource is a jar file, it'll be put under
-   *                  lib/ entry, otherwise under the resources/ entry.
-   * @param classes Set of classes to start the dependency traversal.
-   * @throws IOException
-   */
+  @Override
   public void createBundle(Location target, Iterable<Class<?>> classes, Iterable<URI> resources) throws IOException {
     LOG.debug("start creating bundle {}. building a temporary file locally at first", target.getName());
     // Write the jar to local tmp file first

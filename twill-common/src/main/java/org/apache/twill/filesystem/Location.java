@@ -154,6 +154,14 @@ public interface Location {
   long lastModified() throws IOException;
 
   /**
+   * Sets the last modified time of file.
+   *
+   * @param  time  The new last-modified time, measured in milliseconds since
+   *               the epoch (00:00:00 GMT, January 1, 1970)
+   */
+  void setLastModified(long time) throws IOException;
+
+  /**
    * Checks if this location represents a directory.
    *
    * @return {@code true} if it is a directory, {@code false} otherwise.
@@ -167,6 +175,15 @@ public interface Location {
    *         An empty list is returned if this location is not a directory.
    */
   List<Location> list() throws IOException;
+
+  /**
+   * List the locations under this location with status. Each {@link LocationStatus} returned represents
+   * status of the associated {@link Location} at the time when list is performed.
+   *
+   * @return Immutable List of {@link LocationStatus} for locations under this location.
+   *         An empty list is returned if this location is not a directory.
+   */
+  List<LocationStatus> listStatus() throws IOException;
 
   /**
    * Returns the location factory used to create this instance.

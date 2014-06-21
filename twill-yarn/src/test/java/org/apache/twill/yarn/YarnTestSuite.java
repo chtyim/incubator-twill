@@ -17,8 +17,14 @@
  */
 package org.apache.twill.yarn;
 
+import org.junit.AfterClass;
+import org.junit.BeforeClass;
+import org.junit.ClassRule;
+import org.junit.rules.TemporaryFolder;
 import org.junit.runner.RunWith;
 import org.junit.runners.Suite;
+
+import java.io.IOException;
 
 /**
  * Test suite for all tests with mini yarn cluster.
@@ -42,4 +48,19 @@ import org.junit.runners.Suite;
                     })
 public final class YarnTestSuite {
 
+  @ClassRule
+  public static TemporaryFolder tmpFolder = new TemporaryFolder();
+
+  @BeforeClass
+  public static void init() throws IOException {
+    YarnTestUtils.init(tmpFolder);
+    YarnTestUtils.runInit = false;
+    YarnTestUtils.runFinish = false;
+  }
+
+  @AfterClass
+  public static void finish() {
+    YarnTestUtils.runFinish = true;
+    YarnTestUtils.finish();
+  }
 }

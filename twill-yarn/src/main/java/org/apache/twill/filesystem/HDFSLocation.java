@@ -17,8 +17,10 @@
  */
 package org.apache.twill.filesystem;
 
+import com.google.common.base.Function;
 import com.google.common.base.Objects;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.Lists;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
@@ -38,6 +40,15 @@ import java.util.UUID;
  * A concrete implementation of {@link Location} for the HDFS filesystem.
  */
 final class HDFSLocation implements Location {
+
+  private static final Function<LocationStatus, Location> STATUS_TO_LOCATION =
+    new Function<LocationStatus, Location>() {
+      @Override
+      public Location apply(LocationStatus input) {
+        return input.getLocation();
+      }
+    };
+
   private final FileSystem fs;
   private final Path path;
   private final HDFSLocationFactory locationFactory;
@@ -198,18 +209,29 @@ final class HDFSLocation implements Location {
   }
 
   @Override
+  public void setLastModified(long time) throws IOException {
+    fs.setTimes(path, time, -1);
+  }
+
+  @Override
   public boolean isDirectory() throws IOException {
     return fs.isDirectory(path);
   }
 
   @Override
   public List<Location> list() throws IOException {
+    return Lists.transform(listStatus(), STATUS_TO_LOCATION);
+  }
+
+  @Override
+  public List<LocationStatus> listStatus() throws IOException {
     FileStatus[] statuses = fs.listStatus(path);
-    ImmutableList.Builder<Location> result = ImmutableList.builder();
+    ImmutableList.Builder<LocationStatus> result = ImmutableList.builder();
     if (statuses != null) {
       for (FileStatus status : statuses) {
         if (!Objects.equal(path, status.getPath())) {
-          result.add(new HDFSLocation(locationFactory, status.getPath()));
+          Location location = new HDFSLocation(locationFactory, status.getPath());
+          result.add(new LocationStatus(location, status.isDirectory(), status.getModificationTime(), status.getLen()));
         }
       }
     }
@@ -237,5 +259,10 @@ final class HDFSLocation implements Location {
   @Override
   public int hashCode() {
     return path.hashCode();
+  }
+
+  @Override
+  public String toString() {
+    return path.toUri().toString();
   }
 }

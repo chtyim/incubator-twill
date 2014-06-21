@@ -64,6 +64,30 @@ public final class Constants {
     }
   }
 
+  /**
+   * Constants related to {@link org.apache.twill.internal.BundleCache}.
+   */
+  public static final class BundleCache {
+
+    /** Key in Configuration for enable usage of bundle cache. */
+    public static final String ENABLE = "twill.bundle.cache.enable";
+
+    /** Key in Configuration for how often to perform cache cleanup. */
+    public static final String CLEANUP_SECONDS = "twill.bundle.cache.cleanup.seconds";
+
+    /** Key in Configuration for maximum cached entries to maintain. */
+    public static final String MAX_ENTRIES = "twill.bundle.cache.cleanup.max.entries";
+
+    // For bundle jar caching
+    public static final String CACHE_DIR = ".cached";
+
+    /** By default how often does the bundle cache cleanup run. */
+    public static final long DEFAULT_CLEANUP_SECONDS = 1800;
+
+    /** By default the max. number of entries in the cache. */
+    public static final int DEFAULT_MAX_ENTRIES = 1000;
+  }
+
   private Constants() {
   }
 }

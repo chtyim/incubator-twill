@@ -37,6 +37,7 @@ import com.google.common.util.concurrent.AbstractIdleService;
 import com.google.common.util.concurrent.Callables;
 import com.google.common.util.concurrent.FutureCallback;
 import com.google.common.util.concurrent.Futures;
+import com.google.common.util.concurrent.Service;
 import com.google.gson.Gson;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -64,6 +65,9 @@ import org.apache.twill.common.Threads;
 import org.apache.twill.filesystem.HDFSLocationFactory;
 import org.apache.twill.filesystem.Location;
 import org.apache.twill.filesystem.LocationFactory;
+import org.apache.twill.internal.ApplicationBundler;
+import org.apache.twill.internal.BundleCache;
+import org.apache.twill.internal.Bundler;
 import org.apache.twill.internal.Constants;
 import org.apache.twill.internal.ProcessController;
 import org.apache.twill.internal.RunIds;
@@ -128,6 +132,7 @@ public final class YarnTwillRunnerService extends AbstractIdleService implements
   private final ZKClientService zkClientService;
   private final LocationFactory locationFactory;
   private final Table<String, RunId, YarnTwillController> controllers;
+  private final Bundler bundler;
   private ScheduledExecutorService secureStoreScheduler;
 
   private Iterable<LiveInfo> liveInfos;
@@ -159,6 +164,18 @@ public final class YarnTwillRunnerService extends AbstractIdleService implements
     this.locationFactory = locationFactory;
     this.zkClientService = getZKClientService(zkConnect);
     this.controllers = HashBasedTable.create();
+
+    Bundler bundler = new ApplicationBundler(ImmutableList.<String>of());
+    if (config.getBoolean(Constants.BundleCache.ENABLE, false)) {
+      LOG.info("Use bundle cache");
+      long cleanupMs = TimeUnit.SECONDS.toMillis(config.getLong(Constants.BundleCache.CLEANUP_SECONDS,
+                                                                Constants.BundleCache.DEFAULT_CLEANUP_SECONDS));
+      int maxEntries = config.getInt(Constants.BundleCache.MAX_ENTRIES, Constants.BundleCache.DEFAULT_MAX_ENTRIES);
+
+      bundler = new BundleCache(locationFactory.create(Constants.BundleCache.CACHE_DIR),
+                                bundler, cleanupMs, maxEntries);
+    }
+    this.bundler = bundler;
   }
 
   /**
@@ -253,8 +270,8 @@ public final class YarnTwillRunnerService extends AbstractIdleService implements
     final TwillSpecification twillSpec = application.configure();
     final String appName = twillSpec.getName();
 
-    return new YarnTwillPreparer(yarnConfig, twillSpec, yarnAppClient, zkClientService, locationFactory, jvmOptions,
-                                 new YarnTwillControllerFactory() {
+    return new YarnTwillPreparer(yarnConfig, twillSpec, yarnAppClient, zkClientService,
+                                 locationFactory, jvmOptions, bundler, new YarnTwillControllerFactory() {
       @Override
       public YarnTwillController create(RunId runId, Iterable<LogHandler> logHandlers,
                                         Callable<ProcessController<YarnApplicationReport>> startUp) {
@@ -298,6 +315,9 @@ public final class YarnTwillRunnerService extends AbstractIdleService implements
   protected void startUp() throws Exception {
     yarnAppClient.startAndWait();
     zkClientService.startAndWait();
+    if (bundler instanceof Service) {
+      ((Service) bundler).startAndWait();
+    }
 
     // Create the root node, so that the namespace root would get created if it is missing
     // If the exception is caused by node exists, then it's ok. Otherwise propagate the exception.
@@ -334,6 +354,9 @@ public final class YarnTwillRunnerService extends AbstractIdleService implements
       }
     }
     watchCancellable.cancel();
+    if (bundler instanceof Service) {
+      ((Service) bundler).stopAndWait();
+    }
     zkClientService.stopAndWait();
     yarnAppClient.stopAndWait();
   }

@@ -211,6 +211,13 @@ final class LocalLocation implements Location {
   }
 
   @Override
+  public void setLastModified(long time) throws IOException {
+    if (!file.setLastModified(time)) {
+      throw new IOException("Failed to set last modified time on " + file);
+    }
+  }
+
+  @Override
   public boolean isDirectory() throws IOException {
     return file.isDirectory();
   }
@@ -222,6 +229,21 @@ final class LocalLocation implements Location {
     if (files != null) {
       for (File file : files) {
         result.add(new LocalLocation(locationFactory, file));
+      }
+    } else if (!file.exists()) {
+      throw new FileNotFoundException("File " + file + " does not exist.");
+    }
+    return result.build();
+  }
+
+  @Override
+  public List<LocationStatus> listStatus() throws IOException {
+    File[] files = file.listFiles();
+    ImmutableList.Builder<LocationStatus> result = ImmutableList.builder();
+    if (files != null) {
+      for (File file : files) {
+        Location location = new LocalLocation(locationFactory, file);
+        result.add(new LocationStatus(location, file.isDirectory(), file.lastModified(), file.length()));
       }
     } else if (!file.exists()) {
       throw new FileNotFoundException("File " + file + " does not exist.");
@@ -250,5 +272,10 @@ final class LocalLocation implements Location {
   @Override
   public int hashCode() {
     return file.hashCode();
+  }
+
+  @Override
+  public String toString() {
+    return file.toURI().toString();
   }
 }

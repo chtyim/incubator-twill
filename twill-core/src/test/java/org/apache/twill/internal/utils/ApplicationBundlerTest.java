@@ -24,6 +24,7 @@ import com.google.common.io.Files;
 import org.apache.twill.filesystem.LocalLocationFactory;
 import org.apache.twill.filesystem.Location;
 import org.apache.twill.internal.ApplicationBundler;
+import org.apache.twill.internal.Bundler;
 import org.junit.Assert;
 import org.junit.Rule;
 import org.junit.Test;
@@ -52,7 +53,7 @@ public class ApplicationBundlerTest {
     Location location = new LocalLocationFactory(tmpDir.newFolder()).create("test.jar");
 
     // Create a jar file with by tracing dependency
-    ApplicationBundler bundler = new ApplicationBundler(ImmutableList.<String>of());
+    Bundler bundler = new ApplicationBundler(ImmutableList.<String>of());
     bundler.createBundle(location, ApplicationBundler.class);
 
     File targetDir = tmpDir.newFolder();
