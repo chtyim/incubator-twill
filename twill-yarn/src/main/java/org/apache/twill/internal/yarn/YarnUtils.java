@@ -21,7 +21,6 @@ import com.google.common.base.Function;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Throwables;
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
@@ -141,8 +140,24 @@ public class YarnUtils {
   }
 
   /**
-   * Helper method to get delegation tokens for the given LocationFactory.
-   * @param config The hadoop configuration.
+   * Helper method to get delegation tokens for the given {@link LocationFactory}.
+   *
+   * @param config The Hadoop configuration.
+   * @param locationFactory The LocationFactory for generating tokens.
+   * @return A new {@link Credentials} instanc
+   */
+  public static Credentials addDelegationTokens(Configuration config,
+                                                LocationFactory locationFactory) throws IOException {
+    Credentials credentials = new Credentials();
+    addDelegationTokens(config, locationFactory, credentials);
+    return credentials;
+  }
+
+  /**
+   * Helper method to get delegation tokens for the given {@link LocationFactory} that are not
+   * already present in the given {@link Credentials}.
+   *
+   * @param config The Hadoop configuration.
    * @param locationFactory The LocationFactory for generating tokens.
    * @param credentials Credentials for storing tokens acquired.
    * @return List of delegation Tokens acquired.

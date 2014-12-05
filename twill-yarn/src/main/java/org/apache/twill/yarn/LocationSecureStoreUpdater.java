@@ -19,7 +19,6 @@ package org.apache.twill.yarn;
 
 import com.google.common.base.Throwables;
 import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.security.Credentials;
 import org.apache.twill.api.RunId;
 import org.apache.twill.api.SecureStore;
 import org.apache.twill.api.SecureStoreUpdater;
@@ -44,9 +43,7 @@ final class LocationSecureStoreUpdater implements SecureStoreUpdater {
   @Override
   public SecureStore update(String application, RunId runId) {
     try {
-      Credentials credentials = new Credentials();
-      YarnUtils.addDelegationTokens(configuration, locationFactory, credentials);
-      return YarnSecureStore.create(credentials);
+      return YarnSecureStore.create(YarnUtils.addDelegationTokens(configuration, locationFactory));
     } catch (IOException e) {
       throw Throwables.propagate(e);
     }
