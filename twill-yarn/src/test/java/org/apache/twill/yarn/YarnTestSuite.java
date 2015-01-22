@@ -53,14 +53,11 @@ public final class YarnTestSuite {
 
   @BeforeClass
   public static void init() throws IOException {
-    YarnTestUtils.init(tmpFolder);
-    YarnTestUtils.runInit = false;
-    YarnTestUtils.runFinish = false;
+    YarnTestUtils.initOnce();
   }
 
   @AfterClass
   public static void finish() {
-    YarnTestUtils.runFinish = true;
     YarnTestUtils.finish();
   }
 }
