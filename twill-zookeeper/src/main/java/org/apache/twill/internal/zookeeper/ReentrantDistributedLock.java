@@ -49,7 +49,7 @@ import java.util.concurrent.locks.ReentrantLock;
 import javax.annotation.Nullable;
 
 /**
- * A reentrant distributed lock implementation that uses ZooKeeper. It uses the receipt described in
+ * A reentrant distributed lock implementation that uses ZooKeeper. It uses the recipe described in
  *
  * http://zookeeper.apache.org/doc/trunk/recipes.html#sc_recipes_Locks
  */
