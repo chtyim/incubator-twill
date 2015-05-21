@@ -17,6 +17,7 @@
  */
 package org.apache.twill.yarn;
 
+import com.google.common.collect.Iterables;
 import org.apache.twill.api.AbstractTwillRunnable;
 import org.apache.twill.api.TwillApplication;
 import org.apache.twill.api.TwillContext;
@@ -107,6 +108,26 @@ public final class ServiceDiscoveryTestRun extends BaseYarnTest {
 
       try {
         discoveredLatch.await();
+      } catch (InterruptedException e) {
+        LOG.warn("Interrupted.", e);
+      }
+
+      // Announce another service to signal the completion of the discovery checking.
+      // It act as a barrier before the runnable shutdown to make sure both runnables
+      // see the "service" announced from each other.
+      final CountDownLatch completeLatch = new CountDownLatch(1);
+      getContext().announce("complete", port);
+      getContext().discover("complete").watchChanges(new ServiceDiscovered.ChangeListener() {
+        @Override
+        public void onChange(ServiceDiscovered serviceDiscovered) {
+          if (Iterables.size(serviceDiscovered) == 2) {
+            completeLatch.countDown();
+          }
+        }
+      }, Threads.SAME_THREAD_EXECUTOR);
+
+      try {
+        completeLatch.await();
       } catch (InterruptedException e) {
         LOG.warn("Interrupted.", e);
       }
