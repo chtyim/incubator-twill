@@ -19,6 +19,7 @@ package org.apache.twill.internal.container;
 
 import com.google.common.base.Charsets;
 import com.google.common.base.Preconditions;
+import com.google.common.io.Closeables;
 import com.google.common.io.Files;
 import com.google.common.util.concurrent.AbstractService;
 import com.google.common.util.concurrent.Service;
@@ -81,33 +82,36 @@ public final class TwillContainerMain extends ServiceMain {
 
     ZKClientService zkClientService = createZKClient(zkConnectStr);
     ZKDiscoveryService discoveryService = new ZKDiscoveryService(zkClientService);
+    try {
+      ZKClient appRunZkClient = getAppRunZKClient(zkClientService, appRunId);
 
-    ZKClient appRunZkClient = getAppRunZKClient(zkClientService, appRunId);
+      TwillSpecification twillSpec = loadTwillSpec(twillSpecFile);
+      renameLocalFiles(twillSpec.getRunnables().get(runnableName));
 
-    TwillSpecification twillSpec = loadTwillSpec(twillSpecFile);
-    renameLocalFiles(twillSpec.getRunnables().get(runnableName));
-    
-    TwillRunnableSpecification runnableSpec = twillSpec.getRunnables().get(runnableName).getRunnableSpecification();
-    ContainerInfo containerInfo = new EnvContainerInfo();
-    Arguments arguments = decodeArgs();
-    BasicTwillContext context = new BasicTwillContext(
-      runId, appRunId, containerInfo.getHost(),
-      arguments.getRunnableArguments().get(runnableName).toArray(new String[0]),
-      arguments.getArguments().toArray(new String[0]),
-      runnableSpec, instanceId, discoveryService, discoveryService, appRunZkClient,
-      instanceCount, containerInfo.getMemoryMB(), containerInfo.getVirtualCores()
-    );
+      TwillRunnableSpecification runnableSpec = twillSpec.getRunnables().get(runnableName).getRunnableSpecification();
+      ContainerInfo containerInfo = new EnvContainerInfo();
+      Arguments arguments = decodeArgs();
+      BasicTwillContext context = new BasicTwillContext(
+        runId, appRunId, containerInfo.getHost(),
+        arguments.getRunnableArguments().get(runnableName).toArray(new String[0]),
+        arguments.getArguments().toArray(new String[0]),
+        runnableSpec, instanceId, discoveryService, discoveryService, appRunZkClient,
+        instanceCount, containerInfo.getMemoryMB(), containerInfo.getVirtualCores()
+      );
 
-    ZKClient containerZKClient = getContainerZKClient(zkClientService, appRunId, runnableName);
-    Configuration conf = new YarnConfiguration(new HdfsConfiguration(new Configuration()));
-    Service service = new TwillContainerService(context, containerInfo, containerZKClient,
-                                                runId, runnableSpec, getClassLoader(),
-                                                createAppLocation(conf));
-    new TwillContainerMain().doMain(
-      service,
-      new LogFlushService(),
-      zkClientService,
-      new TwillZKPathService(containerZKClient, runId));
+      ZKClient containerZKClient = getContainerZKClient(zkClientService, appRunId, runnableName);
+      Configuration conf = new YarnConfiguration(new HdfsConfiguration(new Configuration()));
+      Service service = new TwillContainerService(context, containerInfo, containerZKClient,
+                                                  runId, runnableSpec, getClassLoader(),
+                                                  createAppLocation(conf));
+      new TwillContainerMain().doMain(
+        service,
+        new LogFlushService(),
+        zkClientService,
+        new TwillZKPathService(containerZKClient, runId));
+    } finally {
+      Closeables.closeQuietly(discoveryService);
+    }
   }
 
   private static void loadSecureStore() throws IOException {

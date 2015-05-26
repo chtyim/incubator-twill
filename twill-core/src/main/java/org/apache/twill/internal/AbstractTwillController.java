@@ -19,6 +19,7 @@ package org.apache.twill.internal;
 
 import com.google.common.base.Charsets;
 import com.google.common.collect.Iterables;
+import com.google.common.io.Closeables;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
@@ -44,6 +45,7 @@ import org.apache.twill.zookeeper.ZKClients;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.Closeable;
 import java.util.Iterator;
 import java.util.Queue;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -83,6 +85,9 @@ public abstract class AbstractTwillController extends AbstractZKServiceControlle
   protected void doShutDown() {
     if (logCancellable != null) {
       logCancellable.cancel();
+    }
+    if (discoveryServiceClient instanceof Closeable) {
+      Closeables.closeQuietly((Closeable) discoveryServiceClient);
     }
     // Safe to call stop no matter when state the KafkaClientService is in.
     kafkaClient.stopAndWait();

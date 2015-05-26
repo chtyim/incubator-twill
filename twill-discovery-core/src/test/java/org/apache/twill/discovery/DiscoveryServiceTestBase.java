@@ -26,6 +26,8 @@ import org.apache.twill.common.Threads;
 import org.junit.Assert;
 import org.junit.Test;
 
+import java.io.Closeable;
+import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.util.Iterator;
 import java.util.List;
@@ -46,239 +48,263 @@ public abstract class DiscoveryServiceTestBase {
   @Test
   public void simpleDiscoverable() throws Exception {
     Map.Entry<DiscoveryService, DiscoveryServiceClient> entry = create();
-    DiscoveryService discoveryService = entry.getKey();
-    DiscoveryServiceClient discoveryServiceClient = entry.getValue();
+    try {
+      DiscoveryService discoveryService = entry.getKey();
+      DiscoveryServiceClient discoveryServiceClient = entry.getValue();
 
-    // Register one service running on one host:port
-    Cancellable cancellable = register(discoveryService, "foo", "localhost", 8090);
+      // Register one service running on one host:port
+      Cancellable cancellable = register(discoveryService, "foo", "localhost", 8090);
 
-    // Discover that registered host:port.
-    ServiceDiscovered serviceDiscovered = discoveryServiceClient.discover("foo");
-    Assert.assertTrue(waitTillExpected(1, serviceDiscovered));
+      // Discover that registered host:port.
+      ServiceDiscovered serviceDiscovered = discoveryServiceClient.discover("foo");
+      Assert.assertTrue(waitTillExpected(1, serviceDiscovered));
 
-    Discoverable discoverable = new Discoverable() {
-      @Override
-      public String getName() {
-        return "foo";
-      }
+      Discoverable discoverable = new Discoverable() {
+        @Override
+        public String getName() {
+          return "foo";
+        }
 
-      @Override
-      public InetSocketAddress getSocketAddress() {
-        return new InetSocketAddress("localhost", 8090);
-      }
-    };
+        @Override
+        public InetSocketAddress getSocketAddress() {
+          return new InetSocketAddress("localhost", 8090);
+        }
+      };
 
-    // Check it exists.
-    Assert.assertTrue(serviceDiscovered.contains(discoverable));
+      // Check it exists.
+      Assert.assertTrue(serviceDiscovered.contains(discoverable));
 
-    // Remove the service
-    cancellable.cancel();
+      // Remove the service
+      cancellable.cancel();
 
-    // There should be no service.
-    Assert.assertTrue(waitTillExpected(0, serviceDiscovered));
+      // There should be no service.
+      Assert.assertTrue(waitTillExpected(0, serviceDiscovered));
 
-    Assert.assertFalse(serviceDiscovered.contains(discoverable));
-  }
-
-  @Test
-  public void testChangeListener() throws InterruptedException {
-    Map.Entry<DiscoveryService, DiscoveryServiceClient> entry = create();
-    DiscoveryService discoveryService = entry.getKey();
-    DiscoveryServiceClient discoveryServiceClient = entry.getValue();
-
-    // Start discovery
-    String serviceName = "listener_test";
-    ServiceDiscovered serviceDiscovered = discoveryServiceClient.discover(serviceName);
-
-    // Watch for changes.
-    final BlockingQueue<List<Discoverable>> events = new ArrayBlockingQueue<List<Discoverable>>(10);
-    serviceDiscovered.watchChanges(new ServiceDiscovered.ChangeListener() {
-      @Override
-      public void onChange(ServiceDiscovered serviceDiscovered) {
-        events.add(ImmutableList.copyOf(serviceDiscovered));
-      }
-    }, Threads.SAME_THREAD_EXECUTOR);
-
-    // An empty list will be received first, as no endpoint has been registered.
-    List<Discoverable> discoverables = events.poll(20, TimeUnit.SECONDS);
-    Assert.assertNotNull(discoverables);
-    Assert.assertTrue(discoverables.isEmpty());
-
-    // Register a service
-    Cancellable cancellable = register(discoveryService, serviceName, "localhost", 10000);
-
-    discoverables = events.poll(20, TimeUnit.SECONDS);
-    Assert.assertNotNull(discoverables);
-    Assert.assertEquals(1, discoverables.size());
-
-    // Register another service endpoint
-    Cancellable cancellable2 = register(discoveryService, serviceName, "localhost", 10001);
-
-    discoverables = events.poll(20, TimeUnit.SECONDS);
-    Assert.assertNotNull(discoverables);
-    Assert.assertEquals(2, discoverables.size());
-
-    // Cancel both of them
-    cancellable.cancel();
-    cancellable2.cancel();
-
-    // There could be more than one event triggered, but the last event should be an empty list.
-    discoverables = events.poll(20, TimeUnit.SECONDS);
-    Assert.assertNotNull(discoverables);
-    if (!discoverables.isEmpty()) {
-      discoverables = events.poll(20, TimeUnit.SECONDS);
+      Assert.assertFalse(serviceDiscovered.contains(discoverable));
+    } finally {
+      close(entry);
     }
-
-    Assert.assertTrue(discoverables.isEmpty());
   }
 
   @Test
-  public void testCancelChangeListener() throws InterruptedException {
+  public void testChangeListener() throws InterruptedException, IOException {
     Map.Entry<DiscoveryService, DiscoveryServiceClient> entry = create();
-    DiscoveryService discoveryService = entry.getKey();
-    DiscoveryServiceClient discoveryServiceClient = entry.getValue();
+    try {
+      DiscoveryService discoveryService = entry.getKey();
+      DiscoveryServiceClient discoveryServiceClient = entry.getValue();
 
-    String serviceName = "cancel_listener";
-    ServiceDiscovered serviceDiscovered = discoveryServiceClient.discover(serviceName);
+      // Start discovery
+      String serviceName = "listener_test";
+      ServiceDiscovered serviceDiscovered = discoveryServiceClient.discover(serviceName);
 
-    // An executor that delay execute a Runnable. It's for testing race because listener cancel and discovery changes.
-    Executor delayExecutor = new Executor() {
-      @Override
-      public void execute(final Runnable command) {
-        Thread t = new Thread() {
-          @Override
-          public void run() {
-            try {
-              TimeUnit.SECONDS.sleep(2);
-              command.run();
-            } catch (InterruptedException e) {
-              throw Throwables.propagate(e);
+      // Watch for changes.
+      final BlockingQueue<List<Discoverable>> events = new ArrayBlockingQueue<List<Discoverable>>(10);
+      serviceDiscovered.watchChanges(new ServiceDiscovered.ChangeListener() {
+        @Override
+        public void onChange(ServiceDiscovered serviceDiscovered) {
+          events.add(ImmutableList.copyOf(serviceDiscovered));
+        }
+      }, Threads.SAME_THREAD_EXECUTOR);
+
+      // An empty list will be received first, as no endpoint has been registered.
+      List<Discoverable> discoverables = events.poll(20, TimeUnit.SECONDS);
+      Assert.assertNotNull(discoverables);
+      Assert.assertTrue(discoverables.isEmpty());
+
+      // Register a service
+      Cancellable cancellable = register(discoveryService, serviceName, "localhost", 10000);
+
+      discoverables = events.poll(20, TimeUnit.SECONDS);
+      Assert.assertNotNull(discoverables);
+      Assert.assertEquals(1, discoverables.size());
+
+      // Register another service endpoint
+      Cancellable cancellable2 = register(discoveryService, serviceName, "localhost", 10001);
+
+      discoverables = events.poll(20, TimeUnit.SECONDS);
+      Assert.assertNotNull(discoverables);
+      Assert.assertEquals(2, discoverables.size());
+
+      // Cancel both of them
+      cancellable.cancel();
+      cancellable2.cancel();
+
+      // There could be more than one event triggered, but the last event should be an empty list.
+      discoverables = events.poll(20, TimeUnit.SECONDS);
+      Assert.assertNotNull(discoverables);
+      if (!discoverables.isEmpty()) {
+        discoverables = events.poll(20, TimeUnit.SECONDS);
+      }
+
+      Assert.assertTrue(discoverables.isEmpty());
+    } finally {
+      close(entry);
+    }
+  }
+
+  @Test
+  public void testCancelChangeListener() throws InterruptedException, IOException {
+    Map.Entry<DiscoveryService, DiscoveryServiceClient> entry = create();
+    try {
+      DiscoveryService discoveryService = entry.getKey();
+      DiscoveryServiceClient discoveryServiceClient = entry.getValue();
+
+      String serviceName = "cancel_listener";
+      ServiceDiscovered serviceDiscovered = discoveryServiceClient.discover(serviceName);
+
+      // An executor that delay execute a Runnable. It's for testing race because listener cancel and discovery changes.
+      Executor delayExecutor = new Executor() {
+        @Override
+        public void execute(final Runnable command) {
+          Thread t = new Thread() {
+            @Override
+            public void run() {
+              try {
+                TimeUnit.SECONDS.sleep(2);
+                command.run();
+              } catch (InterruptedException e) {
+                throw Throwables.propagate(e);
+              }
             }
-          }
-        };
-        t.start();
-      }
-    };
+          };
+          t.start();
+        }
+      };
 
-    final BlockingQueue<List<Discoverable>> events = new ArrayBlockingQueue<List<Discoverable>>(10);
-    Cancellable cancelWatch = serviceDiscovered.watchChanges(new ServiceDiscovered.ChangeListener() {
-      @Override
-      public void onChange(ServiceDiscovered serviceDiscovered) {
-        events.add(ImmutableList.copyOf(serviceDiscovered));
-      }
-    }, delayExecutor);
+      final BlockingQueue<List<Discoverable>> events = new ArrayBlockingQueue<List<Discoverable>>(10);
+      Cancellable cancelWatch = serviceDiscovered.watchChanges(new ServiceDiscovered.ChangeListener() {
+        @Override
+        public void onChange(ServiceDiscovered serviceDiscovered) {
+          events.add(ImmutableList.copyOf(serviceDiscovered));
+        }
+      }, delayExecutor);
 
-    // Wait for the init event call
-    Assert.assertNotNull(events.poll(3, TimeUnit.SECONDS));
+      // Wait for the init event call
+      Assert.assertNotNull(events.poll(3, TimeUnit.SECONDS));
 
-    // Register a new service endpoint, wait a short while and then cancel the listener
-    register(discoveryService, serviceName, "localhost", 1);
-    TimeUnit.SECONDS.sleep(1);
-    cancelWatch.cancel();
+      // Register a new service endpoint, wait a short while and then cancel the listener
+      register(discoveryService, serviceName, "localhost", 1);
+      TimeUnit.SECONDS.sleep(1);
+      cancelWatch.cancel();
 
-    // The change listener shouldn't get any event, since the invocation is delayed by the executor.
-    Assert.assertNull(events.poll(3, TimeUnit.SECONDS));
+      // The change listener shouldn't get any event, since the invocation is delayed by the executor.
+      Assert.assertNull(events.poll(3, TimeUnit.SECONDS));
+    } finally {
+      close(entry);
+    }
   }
 
   @Test
   public void manySameDiscoverable() throws Exception {
     Map.Entry<DiscoveryService, DiscoveryServiceClient> entry = create();
-    DiscoveryService discoveryService = entry.getKey();
-    DiscoveryServiceClient discoveryServiceClient = entry.getValue();
+    try {
+      DiscoveryService discoveryService = entry.getKey();
+      DiscoveryServiceClient discoveryServiceClient = entry.getValue();
 
-    List<Cancellable> cancellables = Lists.newArrayList();
+      List<Cancellable> cancellables = Lists.newArrayList();
 
-    cancellables.add(register(discoveryService, "manyDiscoverable", "localhost", 1));
-    cancellables.add(register(discoveryService, "manyDiscoverable", "localhost", 2));
-    cancellables.add(register(discoveryService, "manyDiscoverable", "localhost", 3));
-    cancellables.add(register(discoveryService, "manyDiscoverable", "localhost", 4));
-    cancellables.add(register(discoveryService, "manyDiscoverable", "localhost", 5));
+      cancellables.add(register(discoveryService, "manyDiscoverable", "localhost", 1));
+      cancellables.add(register(discoveryService, "manyDiscoverable", "localhost", 2));
+      cancellables.add(register(discoveryService, "manyDiscoverable", "localhost", 3));
+      cancellables.add(register(discoveryService, "manyDiscoverable", "localhost", 4));
+      cancellables.add(register(discoveryService, "manyDiscoverable", "localhost", 5));
 
-    ServiceDiscovered serviceDiscovered = discoveryServiceClient.discover("manyDiscoverable");
-    Assert.assertTrue(waitTillExpected(5, serviceDiscovered));
+      ServiceDiscovered serviceDiscovered = discoveryServiceClient.discover("manyDiscoverable");
+      Assert.assertTrue(waitTillExpected(5, serviceDiscovered));
 
-    for (int i = 0; i < 5; i++) {
-      cancellables.get(i).cancel();
-      Assert.assertTrue(waitTillExpected(4 - i, serviceDiscovered));
+      for (int i = 0; i < 5; i++) {
+        cancellables.get(i).cancel();
+        Assert.assertTrue(waitTillExpected(4 - i, serviceDiscovered));
+      }
+    } finally {
+      close(entry);
     }
   }
 
   @Test
   public void multiServiceDiscoverable() throws Exception {
     Map.Entry<DiscoveryService, DiscoveryServiceClient> entry = create();
-    DiscoveryService discoveryService = entry.getKey();
-    DiscoveryServiceClient discoveryServiceClient = entry.getValue();
+    try {
+      DiscoveryService discoveryService = entry.getKey();
+      DiscoveryServiceClient discoveryServiceClient = entry.getValue();
 
-    List<Cancellable> cancellables = Lists.newArrayList();
+      List<Cancellable> cancellables = Lists.newArrayList();
 
-    cancellables.add(register(discoveryService, "service1", "localhost", 1));
-    cancellables.add(register(discoveryService, "service1", "localhost", 2));
-    cancellables.add(register(discoveryService, "service1", "localhost", 3));
-    cancellables.add(register(discoveryService, "service1", "localhost", 4));
-    cancellables.add(register(discoveryService, "service1", "localhost", 5));
+      cancellables.add(register(discoveryService, "service1", "localhost", 1));
+      cancellables.add(register(discoveryService, "service1", "localhost", 2));
+      cancellables.add(register(discoveryService, "service1", "localhost", 3));
+      cancellables.add(register(discoveryService, "service1", "localhost", 4));
+      cancellables.add(register(discoveryService, "service1", "localhost", 5));
 
-    cancellables.add(register(discoveryService, "service2", "localhost", 1));
-    cancellables.add(register(discoveryService, "service2", "localhost", 2));
-    cancellables.add(register(discoveryService, "service2", "localhost", 3));
+      cancellables.add(register(discoveryService, "service2", "localhost", 1));
+      cancellables.add(register(discoveryService, "service2", "localhost", 2));
+      cancellables.add(register(discoveryService, "service2", "localhost", 3));
 
-    cancellables.add(register(discoveryService, "service3", "localhost", 1));
-    cancellables.add(register(discoveryService, "service3", "localhost", 2));
+      cancellables.add(register(discoveryService, "service3", "localhost", 1));
+      cancellables.add(register(discoveryService, "service3", "localhost", 2));
 
-    ServiceDiscovered serviceDiscovered = discoveryServiceClient.discover("service1");
-    Assert.assertTrue(waitTillExpected(5, serviceDiscovered));
+      ServiceDiscovered serviceDiscovered = discoveryServiceClient.discover("service1");
+      Assert.assertTrue(waitTillExpected(5, serviceDiscovered));
 
-    serviceDiscovered = discoveryServiceClient.discover("service2");
-    Assert.assertTrue(waitTillExpected(3, serviceDiscovered));
+      serviceDiscovered = discoveryServiceClient.discover("service2");
+      Assert.assertTrue(waitTillExpected(3, serviceDiscovered));
 
-    serviceDiscovered = discoveryServiceClient.discover("service3");
-    Assert.assertTrue(waitTillExpected(2, serviceDiscovered));
+      serviceDiscovered = discoveryServiceClient.discover("service3");
+      Assert.assertTrue(waitTillExpected(2, serviceDiscovered));
 
-    cancellables.add(register(discoveryService, "service3", "localhost", 3));
-    Assert.assertTrue(waitTillExpected(3, serviceDiscovered)); // Shows live iterator.
+      cancellables.add(register(discoveryService, "service3", "localhost", 3));
+      Assert.assertTrue(waitTillExpected(3, serviceDiscovered)); // Shows live iterator.
 
-    for (Cancellable cancellable : cancellables) {
-      cancellable.cancel();
+      for (Cancellable cancellable : cancellables) {
+        cancellable.cancel();
+      }
+
+      Assert.assertTrue(waitTillExpected(0, discoveryServiceClient.discover("service1")));
+      Assert.assertTrue(waitTillExpected(0, discoveryServiceClient.discover("service2")));
+      Assert.assertTrue(waitTillExpected(0, discoveryServiceClient.discover("service3")));
+    } finally {
+      close(entry);
     }
-
-    Assert.assertTrue(waitTillExpected(0, discoveryServiceClient.discover("service1")));
-    Assert.assertTrue(waitTillExpected(0, discoveryServiceClient.discover("service2")));
-    Assert.assertTrue(waitTillExpected(0, discoveryServiceClient.discover("service3")));
   }
 
   @Test
-  public void testIterator() throws InterruptedException {
+  public void testIterator() throws InterruptedException, IOException {
     // This test is to verify TWILL-75
     Map.Entry<DiscoveryService, DiscoveryServiceClient> entry = create();
-    final DiscoveryService service = entry.getKey();
-    DiscoveryServiceClient client = entry.getValue();
+    try {
+      final DiscoveryService service = entry.getKey();
+      DiscoveryServiceClient client = entry.getValue();
 
-    final String serviceName = "iterator";
-    ServiceDiscovered discovered = client.discover(serviceName);
+      final String serviceName = "iterator";
+      ServiceDiscovered discovered = client.discover(serviceName);
 
-    // Create a thread for performing registration.
-    Thread t = new Thread() {
-      @Override
-      public void run() {
-        service.register(new Discoverable() {
-          @Override
-          public String getName() {
-            return serviceName;
-          }
+      // Create a thread for performing registration.
+      Thread t = new Thread() {
+        @Override
+        public void run() {
+          service.register(new Discoverable() {
+            @Override
+            public String getName() {
+              return serviceName;
+            }
 
-          @Override
-          public InetSocketAddress getSocketAddress() {
-            return new InetSocketAddress(12345);
-          }
-        });
-      }
-    };
+            @Override
+            public InetSocketAddress getSocketAddress() {
+              return new InetSocketAddress(12345);
+            }
+          });
+        }
+      };
 
-    Iterator<Discoverable> iterator = discovered.iterator();
-    t.start();
-    t.join();
+      Iterator<Discoverable> iterator = discovered.iterator();
+      t.start();
+      t.join();
 
-    // This would throw exception if there is race condition.
-    Assert.assertFalse(iterator.hasNext());
+      // This would throw exception if there is race condition.
+      Assert.assertFalse(iterator.hasNext());
+    } finally {
+      close(entry);
+    }
   }
 
   protected Cancellable register(DiscoveryService service, final String name, final String host, final int port) {
@@ -310,6 +336,18 @@ public abstract class DiscoveryServiceTestBase {
       return latch.await(60, TimeUnit.SECONDS);
     } catch (InterruptedException e) {
       throw Throwables.propagate(e);
+    }
+  }
+
+  protected void close(Map.Entry<DiscoveryService, DiscoveryServiceClient> pair) throws IOException {
+    DiscoveryService discoveryService = pair.getKey();
+    DiscoveryServiceClient discoveryServiceClient = pair.getValue();
+
+    if (discoveryService instanceof Closeable) {
+      ((Closeable) discoveryService).close();
+    }
+    if (discoveryServiceClient instanceof Closeable) {
+      ((Closeable) discoveryServiceClient).close();
     }
   }
 }

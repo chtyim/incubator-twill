@@ -45,7 +45,10 @@ import org.apache.zookeeper.data.Stat;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.Closeable;
+import java.io.IOException;
 import java.net.InetSocketAddress;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Executors;
@@ -92,7 +95,7 @@ import java.util.concurrent.locks.ReentrantLock;
  *   </pre>
  * </blockquote>
  */
-public class ZKDiscoveryService implements DiscoveryService, DiscoveryServiceClient {
+public class ZKDiscoveryService implements DiscoveryService, DiscoveryServiceClient, Closeable {
   private static final Logger LOG = LoggerFactory.getLogger(ZKDiscoveryService.class);
   private static final String NAMESPACE = "/discoverable";
 
@@ -106,6 +109,7 @@ public class ZKDiscoveryService implements DiscoveryService, DiscoveryServiceCli
   private final LoadingCache<String, ServiceDiscovered> services;
   private final ZKClient zkClient;
   private final ScheduledExecutorService retryExecutor;
+  private final Cancellable cancelWatcher;
 
   /**
    * Constructs ZKDiscoveryService using the provided zookeeper client for storing service registry.
@@ -124,11 +128,11 @@ public class ZKDiscoveryService implements DiscoveryService, DiscoveryServiceCli
   public ZKDiscoveryService(ZKClient zkClient, String namespace) {
     this.discoverables = HashMultimap.create();
     this.lock = new ReentrantLock();
-    this.retryExecutor = Executors.newSingleThreadScheduledExecutor(
-      Threads.createDaemonThreadFactory("zk-discovery-retry"));
     this.zkClient = namespace == null ? zkClient : ZKClients.namespace(zkClient, namespace);
     this.services = CacheBuilder.newBuilder().build(createServiceLoader());
-    this.zkClient.addConnectionWatcher(createConnectionWatcher());
+    this.retryExecutor = Executors.newSingleThreadScheduledExecutor(
+      Threads.createDaemonThreadFactory("zk-discovery-retry"));
+    this.cancelWatcher = this.zkClient.addConnectionWatcher(createConnectionWatcher());
   }
 
   /**
@@ -331,7 +335,7 @@ public class ZKDiscoveryService implements DiscoveryService, DiscoveryServiceCli
           @Override
           public void updated(NodeChildren nodeChildren) {
             // Fetch data of all children nodes in parallel.
-            List<String> children = nodeChildren.getChildren();
+            final List<String> children = nodeChildren.getChildren();
             List<OperationFuture<NodeData>> dataFutures = Lists.newArrayListWithCapacity(children.size());
             for (String child : children) {
               dataFutures.add(zkClient.getData(serviceBase + "/" + child));
@@ -343,14 +347,21 @@ public class ZKDiscoveryService implements DiscoveryService, DiscoveryServiceCli
               @Override
               public void run() {
                 ImmutableSet.Builder<Discoverable> builder = ImmutableSet.builder();
+                int idx = 0;
                 for (NodeData nodeData : Futures.getUnchecked(fetchFuture)) {
                   // For successful fetch, decode the content.
                   if (nodeData != null) {
                     Discoverable discoverable = DiscoverableAdapter.decode(nodeData.getData());
                     if (discoverable != null) {
                       builder.add(discoverable);
+                    } else {
+                      LOG.warn("Empty discoverable for child node: {} {}",
+                               children.get(idx), Arrays.toString(nodeData.getData()));
                     }
+                  } else {
+                    LOG.warn("Fetch child node data failed: {}", children.get(idx));
                   }
+                  idx++;
                 }
                 serviceDiscovered.setDiscoverables(builder.build());
               }
@@ -360,6 +371,15 @@ public class ZKDiscoveryService implements DiscoveryService, DiscoveryServiceCli
         return serviceDiscovered;
       }
     };
+  }
+
+  @Override
+  public void close() throws IOException {
+    try {
+      cancelWatcher.cancel();
+    } finally {
+      retryExecutor.shutdownNow();
+    }
   }
 
   /**
