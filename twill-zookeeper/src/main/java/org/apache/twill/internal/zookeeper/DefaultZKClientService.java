@@ -391,7 +391,13 @@ public final class DefaultZKClientService extends AbstractZKClient implements ZK
 
   private final class ServiceDelegate extends AbstractService implements Watcher {
 
+    private final Runnable stopTask;
+
     private ServiceDelegate() {
+      // Creates the stop task runnable in constructor so that if the stop() method is called from shutdown hook,
+      // it won't fail with class loading error due to failure to load inner class from the shutdown thread.
+      this.stopTask = createStopTask();
+
       // Add a listener for state changes so that we can terminate the service even it is in STARTING state upoon
       // stop is requested
       addListener(new Listener() {
@@ -420,6 +426,8 @@ public final class DefaultZKClientService extends AbstractZKClient implements ZK
 
         @Override
         public void failed(State from, Throwable failure) {
+          eventExecutor.shutdownNow();
+          // Close the ZK client if there is exception. It is needed because the stop task may not get executed
           closeZooKeeper(zooKeeper.getAndSet(null));
         }
       }, Threads.SAME_THREAD_EXECUTOR);
@@ -444,24 +452,21 @@ public final class DefaultZKClientService extends AbstractZKClient implements ZK
 
     @Override
     protected void doStop() {
-      eventExecutor.submit(new Runnable() {
-        @Override
-        public void run() {
-          try {
-            closeZooKeeper(zooKeeper.getAndSet(null));
-            notifyStopped();
-          } catch (Exception e) {
-            notifyFailed(e);
-          }
-        }
-      });
+      // Submit a task to the executor to make sure all pending events in the executor are fired before
+      // transiting this Service into STOPPED state
+      eventExecutor.submit(stopTask);
       eventExecutor.shutdown();
     }
 
     @Override
     public void process(WatchedEvent event) {
+      State state = state();
+      if (state == State.TERMINATED || state == State.FAILED) {
+        return;
+      }
+
       try {
-        if (event.getState() == Event.KeeperState.SyncConnected && state() == State.STARTING) {
+        if (event.getState() == Event.KeeperState.SyncConnected && state == State.STARTING) {
           LOG.debug("Connected to ZooKeeper: {}", zkStr);
           notifyStarted();
           return;
@@ -473,6 +478,7 @@ public final class DefaultZKClientService extends AbstractZKClient implements ZK
           eventExecutor.submit(new Runnable() {
             @Override
             public void run() {
+              // Only reconnect if the current state is running
               if (state() != State.RUNNING) {
                 return;
               }
@@ -492,6 +498,33 @@ public final class DefaultZKClientService extends AbstractZKClient implements ZK
           }
         }
       }
+    }
+
+
+    /**
+     * Creates a {@link Runnable} task that will get executed in the event executor for transiting this
+     * Service into STOPPED state.
+     */
+    private Runnable createStopTask() {
+      return new Runnable() {
+        @Override
+        public void run() {
+          try {
+            // Close the ZK connection in this task will make sure if there is ZK connection created
+            // after doStop() was called but before this task has been executed is also closed.
+            // It is possible to happen when the following sequence happens:
+            //
+            // 1. session expired, hence the expired event is triggered
+            // 2. The reconnect task executed. With Service.state() == RUNNING, it creates a new ZK client
+            // 3. Service.stop() gets called, Service.state() changed to STOPPING
+            // 4. The new ZK client created from the reconnect thread update the zooKeeper with the new one
+            closeZooKeeper(zooKeeper.getAndSet(null));
+            notifyStopped();
+          } catch (Exception e) {
+            notifyFailed(e);
+          }
+        }
+      };
     }
 
     /**
@@ -516,6 +549,7 @@ public final class DefaultZKClientService extends AbstractZKClient implements ZK
         }
       } catch (InterruptedException e) {
         LOG.warn("Interrupted when closing ZooKeeper", e);
+        Thread.currentThread().interrupt();
       }
     }
   }
