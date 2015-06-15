@@ -475,6 +475,9 @@ public final class DefaultZKClientService extends AbstractZKClient implements ZK
           LOG.info("ZooKeeper session expired: {}", zkStr);
 
           // When connection expired, simply reconnect again
+          if (state != State.RUNNING) {
+            return;
+          }
           eventExecutor.submit(new Runnable() {
             @Override
             public void run() {
