@@ -166,6 +166,7 @@ public class ZKClientTest {
 
   @Test
   public void testExpireRewatch() throws InterruptedException, IOException, ExecutionException {
+    LOG.info("Test expire rewatch");
     InMemoryZKServer zkServer = InMemoryZKServer.builder().setTickTime(1000).build();
     zkServer.startAndWait();
 
@@ -179,8 +180,10 @@ public class ZKClientTest {
             @Override
             public void process(WatchedEvent event) {
               if (event.getState() == Event.KeeperState.Expired) {
+                LOG.info("Connection expired");
                 expired.set(true);
               } else if (event.getState() == Event.KeeperState.SyncConnected && expired.compareAndSet(true, true)) {
+                LOG.info("Reconnected");
                 expireReconnectLatch.countDown();
               }
             }
@@ -192,6 +195,7 @@ public class ZKClientTest {
         client.exists("/expireRewatch", new Watcher() {
           @Override
           public void process(WatchedEvent event) {
+            LOG.info("Exists watch: {}", event);
             client.exists("/expireRewatch", this);
             events.add(event.getType());
           }
@@ -209,6 +213,7 @@ public class ZKClientTest {
           LOG.info("Delete failed. Retrying to delete /expireRewatch");
           TimeUnit.MILLISECONDS.sleep(10);
         }
+        LOG.info("Node deleted");
 
         Assert.assertEquals(Watcher.Event.EventType.NodeDeleted, events.poll(60, TimeUnit.SECONDS));
       } finally {
@@ -216,6 +221,7 @@ public class ZKClientTest {
       }
     } finally {
       zkServer.stopAndWait();
+      LOG.info("Done test expire rewatch");
     }
   }
 
