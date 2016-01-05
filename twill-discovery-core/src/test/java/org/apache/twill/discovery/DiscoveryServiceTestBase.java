@@ -25,6 +25,8 @@ import org.apache.twill.common.Cancellable;
 import org.apache.twill.common.Threads;
 import org.junit.Assert;
 import org.junit.Test;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.net.InetSocketAddress;
 import java.util.Iterator;
@@ -40,6 +42,8 @@ import java.util.concurrent.TimeUnit;
  * Base class for testing different discovery service implementation.
  */
 public abstract class DiscoveryServiceTestBase {
+
+  private static final Logger LOG = LoggerFactory.getLogger(DiscoveryServiceTestBase.class);
 
   protected abstract Map.Entry<DiscoveryService, DiscoveryServiceClient> create();
 
@@ -95,7 +99,9 @@ public abstract class DiscoveryServiceTestBase {
     serviceDiscovered.watchChanges(new ServiceDiscovered.ChangeListener() {
       @Override
       public void onChange(ServiceDiscovered serviceDiscovered) {
-        events.add(ImmutableList.copyOf(serviceDiscovered));
+        List<Discoverable> discoverables = ImmutableList.copyOf(serviceDiscovered);
+        LOG.info("testChangeListener discoverables Changed: {}", discoverables);
+        events.add(discoverables);
       }
     }, Threads.SAME_THREAD_EXECUTOR);
 
