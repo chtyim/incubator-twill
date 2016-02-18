@@ -55,7 +55,7 @@ import javax.annotation.Nullable;
  * Apache Hadoop 2.1 and beyond.
  * </p>
  */
-public final class Hadoop21YarnAppClient extends AbstractIdleService implements YarnAppClient {
+public class Hadoop21YarnAppClient extends AbstractIdleService implements YarnAppClient {
 
   private static final Logger LOG = LoggerFactory.getLogger(Hadoop21YarnAppClient.class);
   private final YarnClient yarnClient;
@@ -131,9 +131,8 @@ public final class Hadoop21YarnAppClient extends AbstractIdleService implements 
       Credentials credentials = YarnUtils.decodeCredentials(context.getTokens());
 
       Configuration config = yarnClient.getConfig();
-      Token<TokenIdentifier> token = ConverterUtils.convertFromYarn(
-        yarnClient.getRMDelegationToken(new Text(YarnUtils.getYarnTokenRenewer(config))),
-        YarnUtils.getRMAddress(config));
+      Text renewer = new Text(YarnUtils.getYarnTokenRenewer(config));
+      Token<TokenIdentifier> token = convertRMToken(config, yarnClient.getRMDelegationToken(renewer));
 
       LOG.info("Added RM delegation token {}", token);
       credentials.addToken(token.getService(), token);
@@ -144,6 +143,11 @@ public final class Hadoop21YarnAppClient extends AbstractIdleService implements 
       LOG.error("Fails to create credentials.", e);
       throw Throwables.propagate(e);
     }
+  }
+
+  protected <T extends TokenIdentifier> Token<T> convertRMToken(Configuration config,
+                                                                org.apache.hadoop.yarn.api.records.Token rmToken) {
+    return ConverterUtils.convertFromYarn(rmToken, YarnUtils.getRMAddress(config));
   }
 
   @Override

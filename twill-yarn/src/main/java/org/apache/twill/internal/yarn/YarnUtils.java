@@ -21,16 +21,17 @@ import com.google.common.base.Function;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Throwables;
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
+import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.io.DataInputByteBuffer;
 import org.apache.hadoop.io.DataOutputBuffer;
 import org.apache.hadoop.security.Credentials;
 import org.apache.hadoop.security.SecurityUtil;
 import org.apache.hadoop.security.UserGroupInformation;
 import org.apache.hadoop.security.token.Token;
+import org.apache.hadoop.util.VersionInfo;
 import org.apache.hadoop.yarn.api.records.ApplicationId;
 import org.apache.hadoop.yarn.api.records.LocalResourceType;
 import org.apache.hadoop.yarn.api.records.LocalResourceVisibility;
@@ -39,6 +40,7 @@ import org.apache.hadoop.yarn.conf.YarnConfiguration;
 import org.apache.hadoop.yarn.util.ConverterUtils;
 import org.apache.hadoop.yarn.util.Records;
 import org.apache.twill.api.LocalFile;
+import org.apache.twill.filesystem.FileContextLocationFactory;
 import org.apache.twill.filesystem.ForwardingLocationFactory;
 import org.apache.twill.filesystem.HDFSLocationFactory;
 import org.apache.twill.filesystem.LocationFactory;
@@ -49,6 +51,8 @@ import java.io.IOException;
 import java.lang.reflect.Method;
 import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
@@ -64,7 +68,9 @@ public class YarnUtils {
   public enum HadoopVersions {
     HADOOP_20,
     HADOOP_21,
-    HADOOP_22
+    HADOOP_22,
+    HADOOP_23,
+    HADOOP_24
   }
 
   private static final Logger LOG = LoggerFactory.getLogger(YarnUtils.class);
@@ -155,17 +161,23 @@ public class YarnUtils {
       return ImmutableList.of();
     }
 
-    FileSystem fileSystem = getFileSystem(locationFactory);
+    locationFactory = getActualLocationFactory(locationFactory);
 
-    if (fileSystem == null) {
-      LOG.debug("LocationFactory is not HDFS");
-      return ImmutableList.of();
+    // Perform different logic to get delegation tokens based on the location factory type.
+    List<Token<?>> tokens = Collections.emptyList();
+    if (locationFactory instanceof HDFSLocationFactory) {
+      String renewer = getYarnTokenRenewer(config);
+      FileSystem fileSystem = ((HDFSLocationFactory) locationFactory).getFileSystem();
+      tokens = Arrays.asList(fileSystem.addDelegationTokens(renewer, credentials));
+    } else if (locationFactory instanceof FileContextLocationFactory) {
+      tokens = ((FileContextLocationFactory) locationFactory).getFileContext().getDelegationTokens(
+        new Path(locationFactory.getHomeLocation().toURI()), YarnUtils.getYarnTokenRenewer(config)
+      );
+      for (Token<?> token : tokens) {
+        credentials.addToken(token.getService(), token);
+      }
     }
-
-    String renewer = getYarnTokenRenewer(config);
-
-    Token<?>[] tokens = fileSystem.addDelegationTokens(renewer, credentials);
-    return tokens == null ? ImmutableList.<Token<?>>of() : ImmutableList.copyOf(tokens);
+    return Collections.unmodifiableList(tokens);
   }
 
   public static ByteBuffer encodeCredentials(Credentials credentials) {
@@ -221,17 +233,21 @@ public class YarnUtils {
     if (hadoopVersion != null) {
       return hadoopVersion;
     }
-    try {
-      Class.forName("org.apache.hadoop.yarn.client.api.NMClient");
-      try {
-        Class.forName("org.apache.hadoop.yarn.client.cli.LogsCLI");
-        HADOOP_VERSION.set(HadoopVersions.HADOOP_22);
-      } catch (ClassNotFoundException e) {
-        HADOOP_VERSION.set(HadoopVersions.HADOOP_21);
-      }
-    } catch (ClassNotFoundException e) {
+
+    String version = VersionInfo.getVersion();
+    if (version.startsWith("2.0.")) {
       HADOOP_VERSION.set(HadoopVersions.HADOOP_20);
+    } else if (version.startsWith("2.1.")) {
+      HADOOP_VERSION.set(HadoopVersions.HADOOP_21);
+    } else if (version.startsWith("2.2.")) {
+      HADOOP_VERSION.set(HadoopVersions.HADOOP_22);
+    } else if (version.startsWith("2.3.")) {
+      HADOOP_VERSION.set(HadoopVersions.HADOOP_23);
+    } else {
+      // Any greater than 2.3 will default to 2.4
+      HADOOP_VERSION.set(HadoopVersions.HADOOP_24);
     }
+
     return HADOOP_VERSION.get();
   }
 
@@ -277,17 +293,11 @@ public class YarnUtils {
     });
   }
 
-  /**
-   * Gets the Hadoop FileSystem from LocationFactory.
-   */
-  private static FileSystem getFileSystem(LocationFactory locationFactory) {
-    if (locationFactory instanceof HDFSLocationFactory) {
-      return ((HDFSLocationFactory) locationFactory).getFileSystem();
+  private static LocationFactory getActualLocationFactory(LocationFactory locationFactory) {
+    while (locationFactory instanceof ForwardingLocationFactory) {
+      locationFactory = ((ForwardingLocationFactory) locationFactory).getDelegate();
     }
-    if (locationFactory instanceof ForwardingLocationFactory) {
-      return getFileSystem(((ForwardingLocationFactory) locationFactory).getDelegate());
-    }
-    return null;
+    return locationFactory;
   }
 
   private YarnUtils() {

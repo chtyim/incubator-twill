@@ -622,6 +622,7 @@
                                     <sources>
                                         <source>src/main/hadoop21</source>
                                         <source>src/main/hadoop22</source>
+                                        <source>src/main/hadoop24</source>
                                     </sources>
                                 </configuration>
                             </execution>
@@ -678,6 +679,7 @@
                                     <sources>
                                         <source>src/main/hadoop21</source>
                                         <source>src/main/hadoop22</source>
+                                        <source>src/main/hadoop24</source>
                                     </sources>
                                 </configuration>
                             </execution>
@@ -720,6 +722,7 @@
                                     <sources>
                                         <source>src/main/hadoop21</source>
                                         <source>src/main/hadoop22</source>
+                                        <source>src/main/hadoop24</source>
                                     </sources>
                                 </configuration>
                             </execution>
